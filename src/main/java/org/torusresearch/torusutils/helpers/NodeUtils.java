@@ -10,6 +10,7 @@ import com.google.gson.Gson;
 import org.bouncycastle.util.encoders.Hex;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.torusresearch.fetchnodedetails.types.TorusNodePub;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
 import org.torusresearch.torusutils.TorusUtils;
 import org.torusresearch.torusutils.apis.APIUtils;
@@ -27,6 +28,7 @@ import org.torusresearch.torusutils.apis.responses.KeyAssignment;
 import org.torusresearch.torusutils.apis.responses.ShareRequestResult;
 import org.torusresearch.torusutils.apis.responses.VerifierLookupResponse.VerifierLookupResponse;
 import org.torusresearch.torusutils.types.FinalKeyData;
+import org.torusresearch.torusutils.types.CitadelAllowParams;
 import org.torusresearch.torusutils.types.Metadata;
 import org.torusresearch.torusutils.types.NodesData;
 import org.torusresearch.torusutils.types.OAuthKeyData;
@@ -34,14 +36,17 @@ import org.torusresearch.torusutils.types.SessionData;
 import org.torusresearch.torusutils.types.TorusUtilsExtraParams;
 import org.torusresearch.torusutils.types.VerifierParams;
 import org.torusresearch.torusutils.types.common.ImportedShare;
+import org.torusresearch.torusutils.types.common.BuildEnv;
 import org.torusresearch.torusutils.types.common.KeyLookup.KeyLookupResult;
 import org.torusresearch.torusutils.types.common.KeyLookup.KeyResult;
 import org.torusresearch.torusutils.types.common.PubNonce;
 import org.torusresearch.torusutils.types.common.SessionToken;
 import org.torusresearch.torusutils.types.common.TorusKey;
+import org.torusresearch.torusutils.types.common.TorusKeyType;
 import org.torusresearch.torusutils.types.common.TypeOfUser;
 import org.web3j.crypto.Hash;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -51,11 +56,11 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
-
-import okhttp3.internal.http2.Header;
 
 public class NodeUtils {
     private NodeUtils() {
@@ -165,15 +170,32 @@ public class NodeUtils {
     }
 
     public static TorusKey retrieveOrImportShare(@NotNull String legacyMetadataHost, @Nullable Integer serverTimeOffset,
-                                                 @NotNull Boolean enableOneKey, @NotNull String allowHost, @NotNull Web3AuthNetwork network,
-                                                 @NotNull String clientId, @NotNull String[] endpoints, @NotNull String verifier, @NotNull VerifierParams verifierParams,
-                                                 @NotNull String idToken, @Nullable ImportedShare[] importedShares, @NotNull String apiKey, @Nullable String newPrivateKey, @NotNull TorusUtilsExtraParams extraParams
+                                                 @NotNull Boolean enableOneKey, @NotNull Web3AuthNetwork network,
+                                                 @NotNull String clientId, @NotNull BuildEnv buildEnv,
+                                                 @NotNull String[] endpoints, @NotNull BigInteger[] indexes, @NotNull TorusNodePub[] nodePubkeys,
+                                                 @NotNull String verifier, @NotNull VerifierParams verifierParams,
+                                                 @NotNull String idToken, @Nullable ImportedShare[] importedShares,
+                                                 @Nullable String newPrivateKey, @NotNull TorusUtilsExtraParams extraParams,
+                                                 @NotNull TorusKeyType keyType, boolean useDkg, boolean checkCommitment,
+                                                 @NotNull String recordId, @Nullable String source
     ) throws Exception {
         int threshold = (endpoints.length / 2) + 1;
 
         try {
-            APIUtils.get(allowHost, new Header[]{new Header("x-api-key", apiKey), new Header("Origin", verifier), new Header("verifier", verifier), new Header("verifierid", verifierParams.verifier_id), new Header("network", network.name().toLowerCase()),
-                    new Header("clientid", clientId), new Header("enablegating", "true")}, true).get();
+            CitadelUtils.callAllowApi(new CitadelAllowParams(
+                    buildEnv,
+                    verifier,
+                    verifierParams.verifier_id,
+                    network.name().toLowerCase(Locale.ROOT),
+                    clientId,
+                    recordId,
+                    source,
+                    CitadelUtils.CitadelAllowParamsSetOrUnsetFlag.SET,
+                    null,
+                    CitadelUtils.CitadelAllowParamsSetOrUnsetFlag.SET,
+                    null,
+                    null
+            )).get();
         } catch (Exception e) {
             throw TorusUtilError.GATING_ERROR;
         }
@@ -188,13 +210,31 @@ public class NodeUtils {
 
         boolean isImportShareReq = false;
         int importedShareCount = 0;
+        ImportedShare[] finalImportedShares = importedShares;
+        String finalPrivateKey = newPrivateKey;
 
-        if (importedShares != null && importedShares.length > 0) {
-            if (importedShares.length != endpoints.length) {
+        if (finalImportedShares != null && finalImportedShares.length > 0) {
+            if (finalImportedShares.length != endpoints.length) {
                 throw new Error("Invalid imported shares length");
             }
             isImportShareReq = true;
-            importedShareCount = importedShares.length;
+            importedShareCount = finalImportedShares.length;
+        } else if (!useDkg) {
+            if (indexes.length != endpoints.length || nodePubkeys.length != endpoints.length) {
+                throw TorusUtilError.RUNTIME_ERROR("indexes and nodePubkeys must match endpoints when useDkg is false");
+            }
+            BigInteger generatedPrivateKey = KeyUtils.generatePrivate();
+            finalPrivateKey = Common.padLeft(generatedPrivateKey.toString(16), '0', 64);
+            List<ImportedShare> generatedShares = KeyUtils.generateShares(
+                    keyType,
+                    serverTimeOffset == null ? 0 : serverTimeOffset,
+                    Arrays.asList(indexes),
+                    Arrays.asList(nodePubkeys),
+                    finalPrivateKey
+            );
+            finalImportedShares = generatedShares.toArray(new ImportedShare[0]);
+            isImportShareReq = true;
+            importedShareCount = finalImportedShares.length;
         }
 
         int minRequiredCommitmments = (endpoints.length * 3 / 4) + 1;
@@ -203,9 +243,26 @@ public class NodeUtils {
         List<CompletableFuture<String>> CommitmentRequests = new ArrayList<>();
 
         // make commitment requests to endpoints
-        for (int i = 0; i < endpoints.length; i++) {
-            CompletableFuture<String> commitmentRequest = APIUtils.post(endpoints[i], APIUtils.generateJsonRPCObject("CommitmentRequest", new CommitmentRequestParams("mug00", tokenCommitment.replace("0x", ""), pubKeyX, pubKeyY, String.valueOf(System.currentTimeMillis()), verifier)), true);
-            CommitmentRequests.add(i, commitmentRequest);
+        if (checkCommitment) {
+            for (int i = 0; i < endpoints.length; i++) {
+                CommitmentRequestParams commitmentParams = new CommitmentRequestParams(
+                        "mug00",
+                        tokenCommitment.replace("0x", ""),
+                        pubKeyX,
+                        pubKeyY,
+                        String.valueOf(System.currentTimeMillis()),
+                        verifier,
+                        keyType,
+                        verifierParams.verifier_id,
+                        verifierParams.extended_verifier_id,
+                        true
+                );
+                CompletableFuture<String> commitmentRequest = commitmentRequestWithRetry(
+                        endpoints[i],
+                        APIUtils.generateJsonRPCObject("CommitmentRequest", commitmentParams)
+                );
+                CommitmentRequests.add(i, commitmentRequest);
+            }
         }
 
         List<CommitmentRequestResult> nodeSigs = new ArrayList<>();
@@ -225,21 +282,44 @@ public class NodeUtils {
                             break;
                         }
                     }
-                } else {
-                    if (isImportShareReq) {
-                        // cannot continue. all must pass for import
-                        break;
-                    }
                 }
-            } catch (Exception e) {
-                if (isImportShareReq) {
-                    // cannot continue. all must pass for import
-                    break;
-                }
+            } catch (Exception ignored) {
+                // Continue: all requests are already in flight and threshold may still be reached.
             }
         }
 
-        if (importedShareCount > 0 && (nodeSigs.size() != endpoints.length)) {
+        boolean generatedImport = (importedShares == null || importedShares.length == 0) && !useDkg;
+        if (generatedImport) {
+            boolean isExistingKey;
+            if (checkCommitment) {
+                String existingPublicKey = NodeUtils.thresholdSame(
+                        nodeSigs.stream()
+                                .map(item -> item.pub_key_x)
+                                .filter(item -> item != null && !item.isEmpty())
+                                .toArray(String[]::new),
+                        threshold
+                );
+                isExistingKey = existingPublicKey != null;
+            } else {
+                isExistingKey = hasExistingKey(endpoints, verifier, verifierParams.verifier_id, keyType);
+            }
+            if (isExistingKey) {
+                if (checkCommitment) {
+                    int proxyIndex = NodeUtils.getProxyCoordinatorEndpointIndex(endpoints, verifier, verifierParams.verifier_id);
+                    String requiredNodeIndex = indexes[proxyIndex].toString(10);
+                    boolean hasProxyResult = nodeSigs.stream()
+                            .anyMatch(item -> requiredNodeIndex.equals(item.nodeindex));
+                    if (nodeSigs.size() < minRequiredCommitmments || !hasProxyResult) {
+                        throw TorusUtilError.COMMITMENT_REQUEST_FAILED;
+                    }
+                }
+                isImportShareReq = false;
+                importedShareCount = 0;
+                finalPrivateKey = null;
+            }
+        }
+
+        if (checkCommitment && importedShareCount > 0 && (nodeSigs.size() != endpoints.length)) {
             throw TorusUtilError.COMMITMENT_REQUEST_FAILED;
         }
 
@@ -254,7 +334,7 @@ public class NodeUtils {
         if (isImportShareReq) {
             ArrayList<ShareRequestItem> importedItems = new ArrayList<>();
             for (int j = 0; j < endpoints.length; j++) {
-                ImportedShare importShare = importedShares[j];
+                ImportedShare importShare = finalImportedShares[j];
 
                 ShareRequestItem shareRequestItem = new ShareRequestItem(verifier, verifierParams.verifier_id, verifierParams.extended_verifier_id,
                         idToken, extraParams, nodeSigs.toArray(new CommitmentRequestResult[0]), importShare.oauth_pub_key_x, importShare.oauth_pub_key_y,
@@ -264,7 +344,16 @@ public class NodeUtils {
                 );
                 importedItems.add(shareRequestItem);
             }
-            String req = APIUtils.generateJsonRPCObject("ImportShares", new ShareRequestParams(importedItems.toArray(new ShareRequestItem[0]), clientTime));
+            String tempPubX = !checkCommitment && nodeSigs.isEmpty() ? pubKeyX : "";
+            String tempPubY = !checkCommitment && nodeSigs.isEmpty() ? pubKeyY : "";
+            String req = APIUtils.generateJsonRPCObject("ImportShares", new ShareRequestParams(
+                    importedItems.toArray(new ShareRequestItem[0]),
+                    clientTime,
+                    verifier,
+                    tempPubX,
+                    tempPubY,
+                    keyType
+            ));
             String result = APIUtils.post(endpoints[NodeUtils.getProxyCoordinatorEndpointIndex(endpoints, verifier, verifierParams.verifier_id)], req, true).get();
             @SuppressWarnings({"unchecked"}) // Due to Type Erasure of Generic Types at Runtime. Java does this to ensure code is compatible with pre-generic versions of Java.
             JsonRPCResponse<ShareRequestResult[]> response = json.fromJson(result, JsonRPCResponse.class);
@@ -285,12 +374,21 @@ public class NodeUtils {
                 ShareRequestItem shareRequestItem = new ShareRequestItem(verifier, verifierParams.verifier_id, verifierParams.extended_verifier_id,
                         idToken, extraParams, nodeSigs.toArray(new CommitmentRequestResult[0]), null, null,
                         null, null, null,
-                        null, null, null,
+                        null, null, keyType,
                         null, null, verifierParams.sub_verifier_ids, verifierParams.verify_params, null);
 
                 List<ShareRequestItem> shareRequestItems = new ArrayList<>();
                 shareRequestItems.add(shareRequestItem);
-                String req = APIUtils.generateJsonRPCObject("GetShareOrKeyAssign", new ShareRequestParams(shareRequestItems.toArray(new ShareRequestItem[0]), clientTime));
+                String tempPubX = !checkCommitment && nodeSigs.isEmpty() ? pubKeyX : "";
+                String tempPubY = !checkCommitment && nodeSigs.isEmpty() ? pubKeyY : "";
+                String req = APIUtils.generateJsonRPCObject("GetShareOrKeyAssign", new ShareRequestParams(
+                        shareRequestItems.toArray(new ShareRequestItem[0]),
+                        clientTime,
+                        verifier,
+                        tempPubX,
+                        tempPubY,
+                        keyType
+                ));
                 shareRequests.add(APIUtils.post(endpoint, req, true));
             }
 
@@ -342,7 +440,7 @@ public class NodeUtils {
             thresholdNonceData = MetadataUtils.getOrSetSapphireMetadataNonce(legacyMetadataHost, network, thresholdPublicKey.getX(), thresholdPublicKey.getY(), serverOffsetResponse, null, false, null);
         }
 
-        int thresholdReqCount = (importedShares != null && importedShares.length > 0) ? endpoints.length : threshold;
+        int thresholdReqCount = isImportShareReq ? endpoints.length : threshold;
 
         if (!(shareResponses.size() >= thresholdReqCount && thresholdPublicKey != null && (thresholdNonceData != null || verifierParams.extended_verifier_id != null || TorusUtils.isLegacyNetorkRouteMap(network)))) {
             throw TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
@@ -521,10 +619,10 @@ public class NodeUtils {
 
         // This is a sanity check to make doubly sure we are returning the correct private key after importing a share
         if (isImportShareReq) {
-            if (newPrivateKey == null) {
+            if (finalPrivateKey == null) {
                 throw TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
             } else {
-                if (!finalPrivKey.equalsIgnoreCase(Common.padLeft(newPrivateKey, '0', 64))) {
+                if (!finalPrivKey.equalsIgnoreCase(Common.padLeft(finalPrivateKey, '0', 64))) {
                     throw  TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
                 }
             }
@@ -575,5 +673,115 @@ public class NodeUtils {
         String hashedVerifierId = Hash.sha3(verifierIdString).replace("0x", "");
         BigInteger proxyEndPointNum = new BigInteger(hashedVerifierId, 16).mod(BigInteger.valueOf(endpoints.length));
         return proxyEndPointNum.intValue();
+    }
+
+    private static boolean hasExistingKey(
+            @NotNull String[] endpoints,
+            @NotNull String verifier,
+            @NotNull String verifierId,
+            @NotNull TorusKeyType keyType
+    ) throws Exception {
+        int threshold = (endpoints.length / 2) + 1;
+        Map<String, Object> params = new HashMap<>();
+        params.put("verifier", verifier);
+        params.put("verifier_id", verifierId);
+        params.put("key_type", keyType);
+        params.put("client_time", Long.toString(System.currentTimeMillis() / 1000L));
+
+        List<CompletableFuture<String>> requests = new ArrayList<>();
+        for (String endpoint : endpoints) {
+            requests.add(APIUtils.post(
+                    endpoint,
+                    APIUtils.generateJsonRPCObject("VerifierLookupRequest", params),
+                    true
+            ));
+        }
+
+        Gson gson = new Gson();
+        List<KeyResult> keys = new ArrayList<>();
+        List<JsonRPCErrorInfo> errors = new ArrayList<>();
+        for (CompletableFuture<String> request : requests) {
+            try {
+                @SuppressWarnings("unchecked")
+                JsonRPCResponse<VerifierLookupResponse> response = gson.fromJson(request.get(), JsonRPCResponse.class);
+                if (response.getError() != null) {
+                    errors.add(response.getError());
+                } else {
+                    VerifierLookupResponse result = response.getTypedResult(VerifierLookupResponse.class);
+                    if (result != null) {
+                        keys.add(Common.normalizeKeyResult(result));
+                    }
+                }
+            } catch (Exception ignored) {
+                // A threshold result can still be reached from the other nodes.
+            }
+        }
+
+        KeyResult keyResult = NodeUtils.thresholdSame(keys.toArray(new KeyResult[0]), threshold);
+        if (keyResult != null && keyResult.keys != null && keyResult.keys.length > 0) {
+            return true;
+        }
+
+        JsonRPCErrorInfo error = NodeUtils.thresholdSame(errors.toArray(new JsonRPCErrorInfo[0]), threshold);
+        if (error != null) {
+            String errorData = String.valueOf(error.data);
+            if (errorData.contains("Verifier + VerifierID has not yet been assigned")) {
+                return false;
+            }
+            throw TorusUtilError.RUNTIME_ERROR("Verifier lookup failed: " + error.message);
+        }
+
+        throw TorusUtilError.RUNTIME_ERROR("Unable to reach threshold for verifier lookup");
+    }
+
+    private static CompletableFuture<String> commitmentRequestWithRetry(
+            @NotNull String endpoint,
+            @NotNull String requestBody
+    ) {
+        return CompletableFuture.supplyAsync(() -> {
+            int retries = 0;
+            while (true) {
+                if (retries > 0) {
+                    try {
+                        Thread.sleep((1L << retries) * 100L);
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                        throw new CompletionException(error);
+                    }
+                }
+
+                try {
+                    return APIUtils.post(endpoint, requestBody, true).get();
+                } catch (Exception error) {
+                    if (retries >= 4 || !isRetryableCommitmentError(error)) {
+                        throw new CompletionException(error);
+                    }
+                    retries++;
+                }
+            }
+        });
+    }
+
+    private static boolean isRetryableCommitmentError(@NotNull Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof IOException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && (
+                    message.equals("Timed out")
+                            || message.equals("Failed to fetch")
+                            || message.equals("fetch failed")
+                            || message.equals("Load failed")
+                            || message.equals("cancelled")
+                            || message.contains("NetworkError when attempting to fetch resource.")
+                            || message.contains("getaddrinfo EAI_AGAIN")
+            )) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

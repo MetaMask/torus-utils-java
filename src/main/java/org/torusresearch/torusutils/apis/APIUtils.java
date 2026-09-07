@@ -6,7 +6,6 @@ import org.jetbrains.annotations.NotNull;
 import org.torusresearch.torusutils.helpers.Common;
 
 import java.io.IOException;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -60,10 +59,23 @@ public class APIUtils {
             @Override
             public void onResponse(@NotNull Call call, @NotNull Response response) {
                 try {
-                    future.complete(Objects.requireNonNull(response.body()).string());
+                    if (response.body() == null) {
+                        future.completeExceptionally(new IOException("Empty HTTP response body from " + response.request().url()));
+                        return;
+                    }
+                    String body = response.body().string();
+                    if (!response.isSuccessful()) {
+                        future.completeExceptionally(new IOException(
+                                "HTTP " + response.code() + " from " + response.request().url() + ": " + body
+                        ));
+                        return;
+                    }
+                    future.complete(body);
                 } catch (IOException e) {
                     e.printStackTrace();
                     future.completeExceptionally(e);
+                } finally {
+                    response.close();
                 }
             }
         };
@@ -71,6 +83,20 @@ public class APIUtils {
 
     public static CompletableFuture<String> post(String url, String data, Boolean useApiKey) {
         return _post(url, data, new Header[0], useApiKey);
+    }
+
+    public static CompletableFuture<String> put(String url, String data, Boolean useApiKey) {
+        RequestBody body = RequestBody.create(data, JSON);
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(url)
+                .put(body);
+        if (useApiKey && !Common.isEmpty(apiKey)) {
+            requestBuilder.addHeader("x-api-key", apiKey);
+        }
+        Request request = requestBuilder.build();
+        CompletableFuture<String> future = new CompletableFuture<>();
+        client.newCall(request).enqueue(toCallback(future));
+        return future;
     }
 
     @SuppressWarnings("unused")
