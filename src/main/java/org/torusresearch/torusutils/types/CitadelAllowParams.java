@@ -2,8 +2,8 @@ package org.torusresearch.torusutils.types;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
 import org.torusresearch.torusutils.helpers.CitadelUtils.CitadelAllowParamsSetOrUnsetFlag;
-import org.torusresearch.torusutils.types.common.BuildEnv;
 
 public class CitadelAllowParams {
     public final BuildEnv buildEnv;

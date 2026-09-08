@@ -3,6 +3,7 @@ package org.torusresearch.torusutils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.jetbrains.annotations.NotNull;
 import org.torusresearch.fetchnodedetails.types.TorusNodePub;
+import org.torusresearch.fetchnodedetails.types.Utils;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
 import org.torusresearch.torusutils.apis.APIUtils;
 import org.torusresearch.torusutils.apis.JsonRPCErrorInfo;
@@ -17,7 +18,6 @@ import org.torusresearch.torusutils.helpers.CitadelUtils;
 import org.torusresearch.torusutils.helpers.KeyUtils;
 import org.torusresearch.torusutils.helpers.MetadataUtils;
 import org.torusresearch.torusutils.helpers.NodeUtils;
-import org.torusresearch.torusutils.helpers.TorusConstants;
 import org.torusresearch.torusutils.helpers.TorusUtilError;
 import org.torusresearch.torusutils.types.CitadelAllowParams;
 import org.torusresearch.torusutils.types.CitadelAuditParams;
@@ -67,7 +67,7 @@ public class TorusUtils {
         this.keyType = options.keyType;
         if (options.legacyMetadataHost == null) {
             if (isLegacyNetorkRouteMap(options.network)) {
-                this.defaultHost = TorusConstants.LEGACY_METADATA_MAP.get(options.buildEnv);
+                this.defaultHost = Utils.LEGACY_METADATA_MAP.get(options.buildEnv);
             } else {
                 if (options.network.name().equalsIgnoreCase("sapphire_mainnet")) {
                     this.defaultHost = "https://node-1.node.web3auth.io/metadata";
@@ -83,7 +83,7 @@ public class TorusUtils {
     }
 
     public static boolean isLegacyNetorkRouteMap(@NotNull Web3AuthNetwork network) {
-        return TorusConstants.isLegacyNetwork(network);
+        return network.isLegacyNetwork();
     }
 
     @SuppressWarnings("unused")

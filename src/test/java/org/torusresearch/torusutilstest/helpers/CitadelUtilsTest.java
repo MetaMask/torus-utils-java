@@ -3,6 +3,7 @@ package org.torusresearch.torusutilstest.helpers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
 import org.torusresearch.fetchnodedetails.types.TorusNodePub;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
 import org.torusresearch.torusutils.helpers.CitadelUtils;
@@ -12,7 +13,6 @@ import org.torusresearch.torusutils.types.CitadelAuditParams;
 import org.torusresearch.torusutils.types.CitadelAuthFlowAuditParams;
 import org.torusresearch.torusutils.types.RetrieveSharesParams;
 import org.torusresearch.torusutils.types.VerifierParams;
-import org.torusresearch.torusutils.types.common.BuildEnv;
 
 import java.math.BigInteger;
 import java.util.UUID;

@@ -28,7 +28,7 @@ repositories {
         maven { url "https://jitpack.io" }
    }
    dependencies {
-         implementation 'org.torusresearch:torus-utils-java:4.0.3'
+         implementation 'org.torusresearch:torus-utils-java:5.0.0'
    }
 ```
 
@@ -36,3 +36,53 @@ repositories {
 
 - Android - API level 26+
 - Java 8 / 1.8+
+
+## v5 migration
+
+The v5 API replaces the positional share-retrieval arguments with
+`RetrieveSharesParams`. The positional overload remains available but is
+deprecated.
+
+```java
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
+import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
+
+TorusOptions options = new TorusOptions(
+        clientId,
+        Web3AuthNetwork.SAPPHIRE_MAINNET,
+        BuildEnv.PRODUCTION,
+        null,
+        0,
+        false,
+        TorusKeyType.secp256k1,
+        "android"
+);
+
+RetrieveSharesParams params = new RetrieveSharesParams(
+        endpoints,
+        nodeIndexes,
+        nodePubkeys,
+        verifier,
+        verifierParams,
+        idToken,
+        extraParams,
+        null, // useDkg: defaults to true for secp256k1
+        null, // checkCommitment: defaults to true
+        recordId,
+        authConnection
+);
+
+TorusKey key = new TorusUtils(options).retrieveShares(params);
+```
+
+Signer allow requests now use Citadel query parameters and do not send the
+legacy `x-api-key`, `Origin`, or gating headers. A caller-provided `recordId`
+routes auth-flow analytics through the Citadel audit endpoint; otherwise the
+SDK generates a UUID and reports through the signer allow endpoint. Analytics
+reported after retrieval are non-blocking.
+
+Legacy metadata hosts are selected by `BuildEnv` from
+`fetch-node-details-java` (`LEGACY_METADATA_MAP`), and `TorusOptions` now also
+accepts `source` and `keyType`. Ed25519 remains unsupported on legacy
+networks; full Ed25519 encoding support is not part of this compatibility
+change. `useDkg=false` is likewise rejected for legacy networks.

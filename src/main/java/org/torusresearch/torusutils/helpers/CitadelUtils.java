@@ -3,13 +3,14 @@ package org.torusresearch.torusutils.helpers;
 import com.google.gson.Gson;
 
 import org.jetbrains.annotations.NotNull;
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
+import org.torusresearch.fetchnodedetails.types.Utils;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
 import org.torusresearch.torusutils.apis.APIUtils;
 import org.torusresearch.torusutils.types.CitadelAllowParams;
 import org.torusresearch.torusutils.types.CitadelAuditParams;
 import org.torusresearch.torusutils.types.CitadelAuthFlowAuditParams;
 import org.torusresearch.torusutils.types.RetrieveSharesParams;
-import org.torusresearch.torusutils.types.common.BuildEnv;
 
 import java.util.UUID;
 import java.util.Locale;
@@ -39,7 +40,7 @@ public final class CitadelUtils {
 
     @NotNull
     public static String buildAllowUrl(@NotNull CitadelAllowParams params) {
-        String server = TorusConstants.CITADEL_SERVER_MAP.get(params.buildEnv);
+        String server = Utils.CITADEL_SERVER_MAP.get(params.buildEnv);
         if (server == null) {
             throw new IllegalArgumentException("Unsupported build environment: " + params.buildEnv);
         }
@@ -116,7 +117,7 @@ public final class CitadelUtils {
 
     @NotNull
     public static CompletableFuture<String> callAuditApi(@NotNull BuildEnv buildEnv, @NotNull CitadelAuditParams params) {
-        String server = TorusConstants.CITADEL_SERVER_MAP.get(buildEnv);
+        String server = Utils.CITADEL_SERVER_MAP.get(buildEnv);
         if (server == null) {
             throw new IllegalArgumentException("Unsupported build environment: " + buildEnv);
         }

@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
-import org.torusresearch.torusutils.types.common.BuildEnv;
 import org.torusresearch.torusutils.types.common.TorusKeyType;
 import org.torusresearch.torusutils.types.common.TorusOptions;
 

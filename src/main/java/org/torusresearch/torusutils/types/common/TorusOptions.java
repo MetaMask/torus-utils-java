@@ -2,8 +2,9 @@ package org.torusresearch.torusutils.types.common;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.torusresearch.fetchnodedetails.types.BuildEnv;
+import org.torusresearch.fetchnodedetails.types.Utils;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
-import org.torusresearch.torusutils.helpers.TorusConstants;
 
 public class TorusOptions {
     @Nullable
@@ -43,12 +44,12 @@ public class TorusOptions {
         this.network = network;
         this.buildEnv = buildEnv == null ? BuildEnv.PRODUCTION : buildEnv;
         this.keyType = keyType == null ? TorusKeyType.secp256k1 : keyType;
-        if (this.keyType == TorusKeyType.ed25519 && TorusConstants.isLegacyNetwork(network)) {
+        if (this.keyType == TorusKeyType.ed25519 && network.isLegacyNetwork()) {
             throw new IllegalArgumentException("keyType: " + this.keyType + " is not supported by " + network + " network");
         }
         this.legacyMetadataHost = legacyMetadataHost != null
                 ? legacyMetadataHost
-                : (TorusConstants.isLegacyNetwork(network) ? TorusConstants.LEGACY_METADATA_MAP.get(this.buildEnv) : null);
+                : (network.isLegacyNetwork() ? Utils.LEGACY_METADATA_MAP.get(this.buildEnv) : null);
         this.serverTimeOffset = serverTimeOffset == null ? 0 : serverTimeOffset;
         this.enableOneKey = enableOneKey != null && enableOneKey;
         this.source = source;
