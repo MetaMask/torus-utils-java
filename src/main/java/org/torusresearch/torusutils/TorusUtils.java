@@ -5,6 +5,7 @@ import org.jetbrains.annotations.NotNull;
 import org.torusresearch.fetchnodedetails.types.TorusNodePub;
 import org.torusresearch.fetchnodedetails.types.Utils;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
+import org.torusresearch.torusutils.analytics.SentryUtils;
 import org.torusresearch.torusutils.apis.APIUtils;
 import org.torusresearch.torusutils.apis.JsonRPCErrorInfo;
 import org.torusresearch.torusutils.apis.requests.GetMetadataParams;
@@ -60,6 +61,7 @@ public class TorusUtils {
 
     {
         setupBouncyCastle();
+        SentryUtils.init();
     }
 
     public TorusUtils(TorusOptions options) throws TorusUtilError {

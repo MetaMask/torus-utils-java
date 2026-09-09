@@ -14,6 +14,7 @@ import org.torusresearch.fetchnodedetails.types.BuildEnv;
 import org.torusresearch.fetchnodedetails.types.TorusNodePub;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
 import org.torusresearch.torusutils.TorusUtils;
+import org.torusresearch.torusutils.analytics.SentryUtils;
 import org.torusresearch.torusutils.apis.APIUtils;
 import org.torusresearch.torusutils.apis.JsonRPCErrorInfo;
 import org.torusresearch.torusutils.apis.JsonRPCResponse;
@@ -633,6 +634,8 @@ public class NodeUtils {
         if (typeOfUser == TypeOfUser.v2) {
             isUpgraded = metadataNonce.equals(BigInteger.ZERO);
         }
+
+        SentryUtils.logInformation(clientId, finalEvmAddress, "torus-utils-java");
 
         return new TorusKey(
                 new FinalKeyData(finalEvmAddress, finalPubKeyCoords[0], finalPubKeyCoords[1], finalPrivKey),
