@@ -19,7 +19,6 @@ class TorusOptionsTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
 
@@ -27,25 +26,33 @@ class TorusOptionsTest {
         assertThat(options.keyType).isEqualTo(TorusKeyType.secp256k1);
         assertThat(options.enableOneKey).isFalse();
         assertThat(options.serverTimeOffset).isZero();
-        assertThat(options.legacyMetadataHost).isNull();
         assertThat(options.source).isNull();
     }
 
     @Test
-    void resolvesLegacyMetadataByBuildEnvironment() {
+    void keepsBuildEnvAndSource() {
         TorusOptions options = new TorusOptions(
                 "client-id",
                 Web3AuthNetwork.TESTNET,
                 BuildEnv.DEVELOPMENT,
-                null,
                 0,
                 false,
                 TorusKeyType.secp256k1,
                 "android"
         );
 
-        assertThat(options.legacyMetadataHost).isEqualTo("https://api-develop.web3auth.io/metadata-service");
+        assertThat(options.buildEnv).isEqualTo(BuildEnv.DEVELOPMENT);
         assertThat(options.source).isEqualTo("android");
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void deprecatedConstructorsIgnoreTheRemovedLegacyMetadataHost() {
+        TorusOptions options = new TorusOptions("client-id", Web3AuthNetwork.TESTNET, "https://metadata.example", 5, true);
+
+        assertThat(options.serverTimeOffset).isEqualTo(5);
+        assertThat(options.enableOneKey).isTrue();
+        assertThat(options.buildEnv).isEqualTo(BuildEnv.PRODUCTION);
     }
 
     @Test
@@ -54,7 +61,6 @@ class TorusOptionsTest {
                 "client-id",
                 Web3AuthNetwork.MAINNET,
                 BuildEnv.PRODUCTION,
-                null,
                 0,
                 false,
                 TorusKeyType.ed25519,

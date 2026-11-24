@@ -23,6 +23,7 @@ import org.torusresearch.torusutils.types.Metadata;
 import org.torusresearch.torusutils.types.NodesData;
 import org.torusresearch.torusutils.types.OAuthKeyData;
 import org.torusresearch.torusutils.types.OAuthPubKeyData;
+import org.torusresearch.torusutils.types.RetrieveSharesParams;
 import org.torusresearch.torusutils.types.SessionData;
 import org.torusresearch.torusutils.types.VerifierParams;
 import org.torusresearch.torusutils.types.VerifyParams;
@@ -59,7 +60,7 @@ public class OneKeyTest {
     @BeforeEach
     void setup() throws IOException, NoSuchAlgorithmException, InvalidKeySpecException, TorusUtilError {
         fetchNodeDetails = new FetchNodeDetails(Web3AuthNetwork.TESTNET);
-        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.TESTNET, null, 0, true);
+        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.TESTNET, 0, true);
         torusUtils = new TorusUtils(opts);
         ECPrivateKey privateKey = (ECPrivateKey) PemUtils.readPrivateKeyFromFile("src/test/java/org/torusresearch/torusutilstest/keys/key.pem", "EC");
         ECPublicKey publicKey = (ECPublicKey) KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(privateKey.getParams().getGenerator(), privateKey.getParams()));
@@ -91,8 +92,14 @@ public class OneKeyTest {
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_VERIFIER, TORUS_TEST_EMAIL).get();
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, null, null);
 
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_VERIFIER,
-                verifierParams, JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs), null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_VERIFIER,
+                verifierParams,
+                JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs)
+        ));
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(
                 new FinalKeyData("0x53010055542cCc0f2b6715a5c53838eC4aC96EF7",
                         "3fa78a0bfb9ec48810bf1ee332360def2600c4aef528ff8b1e49a0d304722c91",
@@ -134,12 +141,14 @@ public class OneKeyTest {
         String jwt = JwtUtils.generateIdToken(fakeEmail, algorithmRs);
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(verifier, fakeEmail).get();
         VerifierParams verifierParams = new VerifierParams(fakeEmail, null, null, null);
-        TorusKey data = torusUtils.retrieveShares(
+        TorusKey data = torusUtils.retrieveShares(new RetrieveSharesParams(
                 nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
                 verifier,
                 verifierParams,
-                jwt, null
-        );
+                jwt
+        ));
         assertEquals(data.getMetadata().getTypeOfUser(), TypeOfUser.v2);
         assertNotEquals(data.getMetadata().getNonce(), BigInteger.ZERO);
         assertFalse(data.getMetadata().isUpgraded());
@@ -153,8 +162,14 @@ public class OneKeyTest {
         String email = "Jonathan.Nolan@hotmail.com";
         VerifierParams verifierParams = new VerifierParams(email, null, null, null);
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_VERIFIER, email).get();
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_VERIFIER,
-                verifierParams, JwtUtils.generateIdToken(email, algorithmRs), null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_VERIFIER,
+                verifierParams,
+                JwtUtils.generateIdToken(email, algorithmRs)
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assertEquals(torusKey.getFinalKeyData().getPrivKey(), "9ec5b0504e252e35218c7ce1e4660eac190a1505abfbec7102946f92ed750075");
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(
@@ -182,8 +197,14 @@ public class OneKeyTest {
         String hashedIdToken = Hash.sha3String(idToken).replace("0x","");
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, new String[]{TORUS_TEST_VERIFIER}, new VerifyParams[]{new VerifyParams(TORUS_TEST_EMAIL, idToken)});
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_AGGREGATE_VERIFIER, TORUS_TEST_EMAIL).get();
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_AGGREGATE_VERIFIER,
-                verifierParams, hashedIdToken, null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_AGGREGATE_VERIFIER,
+                verifierParams,
+                hashedIdToken
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assertEquals("0xE1155dB406dAD89DdeE9FB9EfC29C8EedC2A0C8B", torusKey.getFinalKeyData().getWalletAddress());
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(

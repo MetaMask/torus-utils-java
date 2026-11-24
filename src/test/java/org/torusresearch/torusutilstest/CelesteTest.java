@@ -23,6 +23,7 @@ import org.torusresearch.torusutils.types.Metadata;
 import org.torusresearch.torusutils.types.NodesData;
 import org.torusresearch.torusutils.types.OAuthKeyData;
 import org.torusresearch.torusutils.types.OAuthPubKeyData;
+import org.torusresearch.torusutils.types.RetrieveSharesParams;
 import org.torusresearch.torusutils.types.SessionData;
 import org.torusresearch.torusutils.types.VerifierParams;
 import org.torusresearch.torusutils.types.VerifyParams;
@@ -59,7 +60,7 @@ public class CelesteTest {
     @BeforeEach
     void setup() throws IOException, NoSuchAlgorithmException, InvalidKeySpecException, TorusUtilError {
         fetchNodeDetails = new FetchNodeDetails(Web3AuthNetwork.CELESTE);
-        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.CELESTE, null, 0, false);
+        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.CELESTE, 0, false);
         torusUtils = new TorusUtils(opts);
         ECPrivateKey privateKey = (ECPrivateKey) PemUtils.readPrivateKeyFromFile("src/test/java/org/torusresearch/torusutilstest/keys/key.pem", "EC");
         ECPublicKey publicKey = (ECPublicKey) KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(privateKey.getParams().getGenerator(),
@@ -163,8 +164,14 @@ public class CelesteTest {
     public void shouldLogin() throws Exception {
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_VERIFIER, TORUS_TEST_EMAIL).get();
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, null, null);
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_VERIFIER, verifierParams,
-                JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs), null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_VERIFIER,
+                verifierParams,
+                JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs)
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assert ((torusKey.getFinalKeyData().getWalletAddress() != null) && torusKey.getFinalKeyData().getWalletAddress().equals("0x58420FB83971C4490D8c9B091f8bfC890D716617"));
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(
@@ -189,8 +196,14 @@ public class CelesteTest {
         String hashedIdToken = Hash.sha3String(idToken).replace("0x", "");
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, new String[]{TORUS_TEST_VERIFIER}, new VerifyParams[]{new VerifyParams(TORUS_TEST_EMAIL, idToken)});
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_AGGREGATE_VERIFIER, TORUS_TEST_EMAIL).get();
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_AGGREGATE_VERIFIER, verifierParams,
-                hashedIdToken, null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_AGGREGATE_VERIFIER,
+                verifierParams,
+                hashedIdToken
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assertEquals("0x535Eb1AefFAc6f699A2a1A5846482d7b5b2BD564", torusKey.getoAuthKeyData().getWalletAddress());
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(

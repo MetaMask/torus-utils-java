@@ -1,5 +1,6 @@
 package org.torusresearch.torusutilstest.helpers;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
@@ -38,8 +39,8 @@ class TorusUtilsValidationTest {
     }
 
     @Test
-    void useDkgFalseIsRejectedForLegacyNetworkBeforeNetworkCall() throws Exception {
-        TorusUtils torusUtils = new TorusUtils(new TorusOptions("client-id", Web3AuthNetwork.MAINNET));
+    @SuppressWarnings("deprecation")
+    void deprecatedUseDkgArgumentIsIgnored() {
         RetrieveSharesParams params = new RetrieveSharesParams(
                 ENDPOINTS,
                 INDEXES,
@@ -49,14 +50,33 @@ class TorusUtilsValidationTest {
                 "token",
                 null,
                 false,
-                true,
-                null,
-                null
+                false,
+                "record-id",
+                "google"
         );
 
-        assertThatThrownBy(() -> torusUtils.retrieveShares(params))
+        assertThat(params.checkCommitment).isFalse();
+        assertThat(params.recordId).isEqualTo("record-id");
+        assertThat(params.authConnection).isEqualTo("google");
+    }
+
+    @Test
+    void importPrivateKeyIsNoLongerRejectedForLegacyNetworks() throws Exception {
+        TorusUtils torusUtils = new TorusUtils(new TorusOptions("client-id", Web3AuthNetwork.MAINNET));
+        ImportPrivateKeyParams params = new ImportPrivateKeyParams(
+                ENDPOINTS,
+                INDEXES,
+                NODE_PUBKEYS,
+                "google",
+                VERIFIER_PARAMS,
+                "token",
+                new String(new char[65]).replace('\0', '1')
+        );
+
+        // fails on the key length check, not on a legacy network check
+        assertThatThrownBy(() -> torusUtils.importPrivateKey(params))
                 .isInstanceOf(TorusUtilError.class)
-                .hasMessageContaining("useDkg cannot be false for legacy network");
+                .hasMessageContaining("Invalid private key length");
     }
 
     @Test

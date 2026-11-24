@@ -13,13 +13,11 @@ import org.jetbrains.annotations.Nullable;
 import org.torusresearch.fetchnodedetails.types.BuildEnv;
 import org.torusresearch.fetchnodedetails.types.TorusNodePub;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
-import org.torusresearch.torusutils.TorusUtils;
 import org.torusresearch.torusutils.apis.APIUtils;
 import org.torusresearch.torusutils.apis.JsonRPCErrorInfo;
 import org.torusresearch.torusutils.apis.JsonRPCResponse;
 import org.torusresearch.torusutils.apis.PubKey;
 import org.torusresearch.torusutils.apis.requests.CommitmentRequestParams;
-import org.torusresearch.torusutils.apis.requests.GetMetadataParams;
 import org.torusresearch.torusutils.apis.requests.GetOrSetKeyParams;
 import org.torusresearch.torusutils.apis.requests.ShareRequestItem;
 import org.torusresearch.torusutils.apis.requests.ShareRequestParams;
@@ -66,7 +64,58 @@ public class NodeUtils {
     private NodeUtils() {
     }
 
-    public static KeyLookupResult getPubKeyOrKeyAssign(@NotNull String[] endpoints, @NotNull Web3AuthNetwork network, @NotNull String verifier, @NotNull String verifierId, @NotNull String legacyMetdadataHost, @Nullable Integer serverTimeOffset, @Nullable String extendedVerifierId) throws Exception {
+    /**
+     * Picks the first node answer that carries a usable nonce.
+     * For a new key, a v1 answer counts only with a nonce, because a node that has not seen the
+     * first nonce write also answers v1 (with an empty nonce).
+     */
+    @Nullable
+    public static GetOrSetNonceResult firstNodeNonce(@NotNull List<GetOrSetNonceResult> nonceDatas, boolean isNewKey) {
+        for (GetOrSetNonceResult item : nonceDatas) {
+            if (item == null) continue;
+            boolean hasPubNonce = item.pubNonce != null && item.pubNonce.x != null && !item.pubNonce.x.isEmpty();
+            boolean hasNonce = item.nonce != null && !item.nonce.isEmpty();
+            boolean isUsableV1 = item.typeOfUser == TypeOfUser.v1 && (hasNonce || !isNewKey);
+            if (hasPubNonce || isUsableV1) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True when any node that agrees on the threshold public key says the key is new.
+     */
+    private static boolean isNewKeyResponse(@NotNull List<ShareRequestResult> shareResponses, @NotNull PubKey thresholdPublicKey) {
+        for (ShareRequestResult item : shareResponses) {
+            if (item.keys.length > 0 && item.keys[0] != null && item.keys[0].public_key != null
+                    && Boolean.TRUE.equals(item.is_new_key)
+                    && item.keys[0].public_key.getX().equalsIgnoreCase(thresholdPublicKey.getX())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Nonce data from the first node that agrees on the threshold public key and carries a usable nonce.
+     */
+    @Nullable
+    private static GetOrSetNonceResult selectThresholdNonce(@NotNull List<ShareRequestResult> shareResponses, @NotNull PubKey thresholdPublicKey, boolean isNewKey) {
+        String thresholdPubKeyX = Common.padLeft(thresholdPublicKey.getX(), '0', 64);
+        List<GetOrSetNonceResult> nonceDatas = new ArrayList<>();
+        for (ShareRequestResult item : shareResponses) {
+            if (item.keys.length > 0 && item.keys[0] != null && item.keys[0].public_key != null
+                    && Common.padLeft(item.keys[0].public_key.getX(), '0', 64).equalsIgnoreCase(thresholdPubKeyX)) {
+                nonceDatas.add(item.keys[0].nonce_data);
+            } else {
+                nonceDatas.add(null);
+            }
+        }
+        return firstNodeNonce(nonceDatas, isNewKey);
+    }
+
+    public static KeyLookupResult getPubKeyOrKeyAssign(@NotNull String[] endpoints, @NotNull String verifier, @NotNull String verifierId, @Nullable Integer serverTimeOffset, @Nullable String extendedVerifierId) throws Exception {
         int threshold = (endpoints.length / 2) + 1;
 
         BigInteger timeOffset = BigInteger.ZERO;
@@ -113,34 +162,27 @@ public class NodeUtils {
             }
         }
 
-        if (key != null && nonce == null && extendedVerifierId == null && !TorusUtils.isLegacyNetorkRouteMap(network)) {
-            for (int i = 0; i < lookupPubKeys.size(); i++) {
-                JsonRPCResponse<VerifierLookupResponse> x1 = lookupPubKeys.get(i);
-                if (x1 != null && x1.getError() == null) {
-                    VerifierLookupResponse x1Result = x1.getTypedResult(VerifierLookupResponse.class);
-                    String currentNodePubKeyX = Common.padLeft(x1Result.keys[0].pub_key_X,'0',64).toLowerCase();
-                    String thresholdPubKeyX = Common.padLeft(key.keys[0].pub_key_X,'0',64).toLowerCase();
-                    if (x1Result.keys[0].nonce_data != null) {
-                        PubNonce pubNonce = x1Result.keys[0].nonce_data.pubNonce;
-                        if (pubNonce != null && currentNodePubKeyX.equals(thresholdPubKeyX)) {
-                            nonce = x1Result.keys[0].nonce_data;
-                            break;
-                        }
-                    }
+        // the metadata nonce comes only from the node responses, on every network
+        if (key != null && key.keys.length > 0 && nonce == null && extendedVerifierId == null) {
+            String thresholdPubKeyX = Common.padLeft(key.keys[0].pub_key_X,'0',64).toLowerCase();
+            List<GetOrSetNonceResult> nonceDatas = new ArrayList<>();
+            for (JsonRPCResponse<VerifierLookupResponse> x1 : lookupPubKeys) {
+                if (x1 == null || x1.getError() != null) {
+                    continue;
                 }
-            }
-
-            if (nonce == null) {
-                nonce = MetadataUtils.getOrSetSapphireMetadataNonce(legacyMetdadataHost, network, key.keys[0].pub_key_X,key.keys[0].pub_key_Y, null, null, false, null);
-                if (nonce.nonce != null) {
-                    nonce.nonce = null;
+                VerifierLookupResponse x1Result = x1.getTypedResult(VerifierLookupResponse.class);
+                if (x1Result == null || x1Result.keys == null || x1Result.keys.length == 0) {
+                    continue;
                 }
+                String currentNodePubKeyX = Common.padLeft(x1Result.keys[0].pub_key_X,'0',64).toLowerCase();
+                nonceDatas.add(currentNodePubKeyX.equals(thresholdPubKeyX) ? x1Result.keys[0].nonce_data : null);
             }
+            nonce = firstNodeNonce(nonceDatas, Boolean.TRUE.equals(key.is_new_key));
         }
 
         ArrayList<Integer> serverTimeOffsets = new ArrayList<>();
         ArrayList<Integer> nodeIndexes = new ArrayList<>();
-        if (key != null && (nonce != null || extendedVerifierId != null || TorusUtils.isLegacyNetorkRouteMap(network) || errResult != null)) {
+        if (key != null && (nonce != null || extendedVerifierId != null || errResult != null)) {
             for (int i = 0; i < lookupPubKeys.size(); i++) {
                 JsonRPCResponse<VerifierLookupResponse> x1 = lookupPubKeys.get(i);
                 VerifierLookupResponse x1Result = x1.getTypedResult(VerifierLookupResponse.class);
@@ -169,17 +211,19 @@ public class NodeUtils {
         return new KeyLookupResult(key, nodeIndexes, finalServerTimeOffset, nonce, errResult);
     }
 
-    public static TorusKey retrieveOrImportShare(@NotNull String legacyMetadataHost, @Nullable Integer serverTimeOffset,
+    public static TorusKey retrieveOrImportShare(@Nullable Integer serverTimeOffset,
                                                  @NotNull Boolean enableOneKey, @NotNull Web3AuthNetwork network,
                                                  @NotNull String clientId, @NotNull BuildEnv buildEnv,
                                                  @NotNull String[] endpoints, @NotNull BigInteger[] indexes, @NotNull TorusNodePub[] nodePubkeys,
                                                  @NotNull String verifier, @NotNull VerifierParams verifierParams,
                                                  @NotNull String idToken, @Nullable ImportedShare[] importedShares,
-                                                 @Nullable String newPrivateKey, @NotNull TorusUtilsExtraParams extraParams,
-                                                 @NotNull TorusKeyType keyType, boolean useDkg, boolean checkCommitment,
+                                                 @NotNull TorusUtilsExtraParams extraParams,
+                                                 @NotNull TorusKeyType keyType, boolean checkCommitment,
                                                  @NotNull String recordId, @Nullable String source
     ) throws Exception {
         int threshold = (endpoints.length / 2) + 1;
+        // a legacy dApp without OneKey uses the oAuth key itself, so its new keys store no nonce
+        final boolean legacyWithoutOneKey = network.isLegacyNetwork() && !enableOneKey;
 
         try {
             CitadelUtils.callAllowApi(new CitadelAllowParams(
@@ -211,26 +255,26 @@ public class NodeUtils {
         boolean isImportShareReq = false;
         int importedShareCount = 0;
         ImportedShare[] finalImportedShares = importedShares;
-        String finalPrivateKey = newPrivateKey;
+        final boolean callerSuppliedShares = importedShares != null && importedShares.length > 0;
+        final boolean canGenerateShares = indexes.length == endpoints.length && nodePubkeys.length == endpoints.length;
 
-        if (finalImportedShares != null && finalImportedShares.length > 0) {
+        if (callerSuppliedShares) {
             if (finalImportedShares.length != endpoints.length) {
                 throw new Error("Invalid imported shares length");
             }
             isImportShareReq = true;
             importedShareCount = finalImportedShares.length;
-        } else if (!useDkg) {
-            if (indexes.length != endpoints.length || nodePubkeys.length != endpoints.length) {
-                throw TorusUtilError.RUNTIME_ERROR("indexes and nodePubkeys must match endpoints when useDkg is false");
-            }
+        } else if (canGenerateShares) {
+            // new users always get a client-generated, imported key
             BigInteger generatedPrivateKey = KeyUtils.generatePrivate();
-            finalPrivateKey = Common.padLeft(generatedPrivateKey.toString(16), '0', 64);
+            String generatedKey = Common.padLeft(generatedPrivateKey.toString(16), '0', 64);
             List<ImportedShare> generatedShares = KeyUtils.generateShares(
                     keyType,
                     serverTimeOffset == null ? 0 : serverTimeOffset,
                     Arrays.asList(indexes),
                     Arrays.asList(nodePubkeys),
-                    finalPrivateKey
+                    generatedKey,
+                    !legacyWithoutOneKey
             );
             finalImportedShares = generatedShares.toArray(new ImportedShare[0]);
             isImportShareReq = true;
@@ -288,7 +332,7 @@ public class NodeUtils {
             }
         }
 
-        boolean generatedImport = (importedShares == null || importedShares.length == 0) && !useDkg;
+        boolean generatedImport = !callerSuppliedShares;
         if (generatedImport) {
             boolean isExistingKey;
             if (checkCommitment) {
@@ -305,19 +349,27 @@ public class NodeUtils {
             }
             if (isExistingKey) {
                 if (checkCommitment) {
-                    int proxyIndex = NodeUtils.getProxyCoordinatorEndpointIndex(endpoints, verifier, verifierParams.verifier_id);
-                    String requiredNodeIndex = indexes[proxyIndex].toString(10);
-                    boolean hasProxyResult = nodeSigs.stream()
-                            .anyMatch(item -> requiredNodeIndex.equals(item.nodeindex));
+                    // the proxy node response is required only when the flow can import shares;
+                    // without node details only threshold commitments are needed
+                    boolean hasProxyResult = true;
+                    if (canGenerateShares) {
+                        int proxyIndex = NodeUtils.getProxyCoordinatorEndpointIndex(endpoints, verifier, verifierParams.verifier_id);
+                        String requiredNodeIndex = indexes[proxyIndex].toString(10);
+                        hasProxyResult = nodeSigs.stream()
+                                .anyMatch(item -> requiredNodeIndex.equals(item.nodeindex));
+                    }
                     if (nodeSigs.size() < minRequiredCommitmments || !hasProxyResult) {
                         throw TorusUtilError.COMMITMENT_REQUEST_FAILED;
                     }
                 }
                 isImportShareReq = false;
                 importedShareCount = 0;
-                finalPrivateKey = null;
+            } else if (!canGenerateShares) {
+                throw TorusUtilError.RUNTIME_ERROR("nodePubkeys and indexes are required to create a new key");
             }
         }
+        // a v1 import splits the key itself and stores no nonce
+        final boolean isV1Import = isImportShareReq && legacyWithoutOneKey;
 
         if (checkCommitment && importedShareCount > 0 && (nodeSigs.size() != endpoints.length)) {
             throw TorusUtilError.COMMITMENT_REQUEST_FAILED;
@@ -404,7 +456,14 @@ public class NodeUtils {
                     thresholdPublicKey = NodeUtils.thresholdSame(shareResponses.stream().filter(res -> res.keys.length > 0).map(res -> res.keys[0].public_key).toArray(PubKey[]::new), threshold);
 
                     if (thresholdPublicKey != null) {
-                        break;
+                        if (verifierParams.extended_verifier_id != null) {
+                            break;
+                        }
+                        // keep reading node responses until one of them carries the nonce
+                        boolean isNewKeyForNonce = isNewKeyResponse(shareResponses, thresholdPublicKey) && !isV1Import;
+                        if (selectThresholdNonce(shareResponses, thresholdPublicKey, isNewKeyForNonce) != null) {
+                            break;
+                        }
                     }
                 } catch (Exception e) {
                     // Continue to try next result
@@ -418,31 +477,23 @@ public class NodeUtils {
 
         ArrayList<String> serverTimeOffsets = new ArrayList<>();
 
-        for (ShareRequestResult item : shareResponses) {
-            if (thresholdNonceData == null && verifierParams.extended_verifier_id == null) {
-                String currentPubKeyX = Common.padLeft(item.keys[0].public_key.getX(), '0', 64);
-                String thresholdPubKeyX = Common.padLeft(thresholdPublicKey.getX(), '0', 64);
-                if (item.keys[0].nonce_data != null) {
-                    GetOrSetNonceResult pubnonce = item.keys[0].nonce_data;
-                    if (pubnonce != null && currentPubKeyX.equalsIgnoreCase(thresholdPubKeyX)) {
-                        thresholdNonceData = pubnonce;
-                    }
-                }
-            }
+        // a v1 import stores no nonce, so its empty v1 answer is final
+        final boolean isNewKey = isNewKeyResponse(shareResponses, thresholdPublicKey);
+        if (verifierParams.extended_verifier_id == null) {
+            thresholdNonceData = selectThresholdNonce(shareResponses, thresholdPublicKey, isNewKey && !isV1Import);
+        }
 
+        for (ShareRequestResult item : shareResponses) {
             serverTimeOffsets.add((item.server_time_offset != null && !item.server_time_offset.isEmpty()) ? item.server_time_offset : "0");
         }
 
         List<Integer> serverOffsetTimes = serverTimeOffsets.stream().map(Integer::parseInt).collect(Collectors.toList());
         Integer serverOffsetResponse = (serverTimeOffset != null) ? serverTimeOffset : Common.calculateMedian(serverOffsetTimes);
 
-        if (thresholdNonceData == null && verifierParams.extended_verifier_id == null && !TorusUtils.isLegacyNetorkRouteMap(network)) {
-            thresholdNonceData = MetadataUtils.getOrSetSapphireMetadataNonce(legacyMetadataHost, network, thresholdPublicKey.getX(), thresholdPublicKey.getY(), serverOffsetResponse, null, false, null);
-        }
-
         int thresholdReqCount = isImportShareReq ? endpoints.length : threshold;
 
-        if (!(shareResponses.size() >= thresholdReqCount && thresholdPublicKey != null && (thresholdNonceData != null || verifierParams.extended_verifier_id != null || TorusUtils.isLegacyNetorkRouteMap(network)))) {
+        // the nonce must come from the nodes, except for an extended verifier id
+        if (!(shareResponses.size() >= thresholdReqCount && thresholdPublicKey != null && (thresholdNonceData != null || verifierParams.extended_verifier_id != null))) {
             throw TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
         }
 
@@ -451,13 +502,8 @@ public class NodeUtils {
         ArrayList<String> sessionTokens = new ArrayList<>();
         ArrayList<Integer> nodeIndexes = new ArrayList<>();
         ArrayList<SessionToken> sessionTokenDatas = new ArrayList<>();
-        ArrayList<IsNewKeyResponse> isNewKeys = new ArrayList<>();
 
         for (ShareRequestResult item : shareResponses) {
-            if (item.keys.length > 0 && item.keys[0] != null) {
-                isNewKeys.add(new IsNewKeyResponse(item.is_new_key, item.keys[0].public_key.getX()));
-            }
-
             if (item.session_token_sigs != null && item.session_token_sigs.length > 0) {
                 if (item.session_token_sig_metadata != null && item.session_token_sig_metadata.length > 0) {
                     String decrypted = MetadataUtils.decryptNodeData(item.session_token_sig_metadata[0], item.session_token_sigs[0], sessionAuthKeySerialized);
@@ -543,50 +589,27 @@ public class NodeUtils {
             throw TorusUtilError.PRIVATE_KEY_DERIVE_FAILED;
         }
 
-        boolean isNewKey = false;
-        for (IsNewKeyResponse item : isNewKeys) {
-            if (item.isNewKey && item.publicKeyX.equalsIgnoreCase(thresholdPublicKey.getX())) {
-                isNewKey = true;
-            }
-        }
-
         String oAuthKey = Common.padLeft(privateKey.toString(16), '0', 64);
         String oAuthPublicKey = KeyUtils.privateToPublic(privateKey);
         String[] oAuthPublicKeyCoords = KeyUtils.getPublicKeyCoords(oAuthPublicKey);
-        BigInteger metadataNonce = (thresholdNonceData != null && thresholdNonceData.nonce != null) ? new BigInteger(Common.padLeft(thresholdNonceData.nonce, '0', 64), 16) : BigInteger.ZERO;
+        BigInteger metadataNonce = (thresholdNonceData != null && thresholdNonceData.nonce != null && !thresholdNonceData.nonce.isEmpty()) ? new BigInteger(Common.padLeft(thresholdNonceData.nonce, '0', 64), 16) : BigInteger.ZERO;
         String finalPublicKey;
         PubNonce pubNonce = null;
         TypeOfUser typeOfUser = TypeOfUser.v1;
 
         if (verifierParams.extended_verifier_id != null) {
+            // for tss key no need to add pub nonce
             typeOfUser = TypeOfUser.v2;
             finalPublicKey = oAuthPublicKey;
-        } else if (TorusUtils.isLegacyNetorkRouteMap(network)) {
-            if (enableOneKey) {
-                GetOrSetNonceResult nonce = MetadataUtils.getOrSetNonce(legacyMetadataHost, thresholdPublicKey.getX(), thresholdPublicKey.getY(), serverOffsetResponse, oAuthKey, !isNewKey, null);
-                metadataNonce = (nonce.nonce != null) ? new BigInteger(Common.padLeft(nonce.nonce, '0', 64), 16) : BigInteger.ZERO;
-                typeOfUser = (nonce.typeOfUser != null) ? nonce.typeOfUser : TypeOfUser.v1;
-
-                if (typeOfUser == TypeOfUser.v2) {
-                    pubNonce = nonce.pubNonce;
-                    if (pubNonce != null && !pubNonce.x.isEmpty() && !pubNonce.y.isEmpty()) {
-                        String pubNonceKey = KeyUtils.getPublicKeyFromCoords(pubNonce.x, pubNonce.y, true);
-                        finalPublicKey = KeyUtils.combinePublicKeysFromStrings(Arrays.asList(oAuthPublicKey, pubNonceKey), false);
-                    } else {
-                        throw TorusUtilError.RUNTIME_ERROR("Public nonce is missing");
-                    }
-                } else {
-                    typeOfUser = TypeOfUser.v1;
-                    metadataNonce = new BigInteger(Common.padLeft(MetadataUtils.getMetadata(legacyMetadataHost, new GetMetadataParams(oAuthPublicKeyCoords[0], oAuthPublicKeyCoords[1])).message, '0', 64), 16);
-                    BigInteger privateKeyWithNonce = new BigInteger(Common.padLeft(oAuthKey, '0', 64), 16).add(metadataNonce);
-                    finalPublicKey = KeyUtils.privateToPublic(privateKeyWithNonce);
-                }
-            } else {
-                // typeOfUser = TypeOfUser.v1; Already assigned previously, left here for clarity
-                metadataNonce = new BigInteger(Common.padLeft(MetadataUtils.getMetadata(legacyMetadataHost, new GetMetadataParams(oAuthPublicKeyCoords[0], oAuthPublicKeyCoords[1])).message, '0', 64), 16);
-                BigInteger privateKeyWithNonce = new BigInteger(Common.padLeft(oAuthKey, '0', 64), 16).add(metadataNonce);
-                finalPublicKey = KeyUtils.privateToPublic(privateKeyWithNonce);
-            }
+        } else if (thresholdNonceData != null && thresholdNonceData.typeOfUser == TypeOfUser.v1) {
+            typeOfUser = TypeOfUser.v1;
+            BigInteger privateKeyWithNonce = privateKey.add(metadataNonce).mod(getOrderOfCurve());
+            finalPublicKey = KeyUtils.privateToPublic(privateKeyWithNonce);
+        } else if (legacyWithoutOneKey) {
+            // a legacy dApp without OneKey ignores a v2 nonce
+            typeOfUser = TypeOfUser.v1;
+            metadataNonce = BigInteger.ZERO;
+            finalPublicKey = oAuthPublicKey;
         } else {
             typeOfUser = TypeOfUser.v2;
             finalPublicKey = oAuthPublicKey;
@@ -615,17 +638,6 @@ public class NodeUtils {
             BigInteger privateKeyWithNonce = privateKey.add(metadataNonce).mod(getOrderOfCurve());
             finalPrivKey = Common.padLeft(privateKeyWithNonce.toString(16), '0', 64);
 
-        }
-
-        // This is a sanity check to make doubly sure we are returning the correct private key after importing a share
-        if (isImportShareReq) {
-            if (finalPrivateKey == null) {
-                throw TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
-            } else {
-                if (!finalPrivKey.equalsIgnoreCase(Common.padLeft(finalPrivateKey, '0', 64))) {
-                    throw  TorusUtilError.RETRIEVE_OR_IMPORT_SHARE_ERROR;
-                }
-            }
         }
 
         Boolean isUpgraded = null;

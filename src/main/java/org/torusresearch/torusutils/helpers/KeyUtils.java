@@ -164,8 +164,15 @@ public class KeyUtils {
     }
 
     public static PrivateKeyData generateKeyData(@NotNull String privateKey) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException {
+        return generateKeyData(privateKey, true);
+    }
+
+    /**
+     * @param withNonce false splits the key itself and uses a zero nonce (v1 import).
+     */
+    public static PrivateKeyData generateKeyData(@NotNull String privateKey, boolean withNonce) throws InvalidAlgorithmParameterException, NoSuchAlgorithmException {
         BigInteger scalar = new BigInteger(privateKey,16);
-        BigInteger randomNonce = new BigInteger(randomNonce(), 16);
+        BigInteger randomNonce = withNonce ? new BigInteger(randomNonce(), 16) : BigInteger.ZERO;
 
         BigInteger oAuthKey = scalar.subtract(randomNonce).mod(getOrderOfCurve());
 
@@ -224,11 +231,21 @@ public class KeyUtils {
     }
 
     public static List<ImportedShare> generateShares(@NotNull TorusKeyType keyType, @NotNull Integer serverTimeOffset, @NotNull List<BigInteger> nodeIndexes, @NotNull List<TorusNodePub> nodePubKeys, @NotNull String privateKey) throws Exception {
+        return generateShares(keyType, serverTimeOffset, nodeIndexes, nodePubKeys, privateKey, true);
+    }
+
+    /**
+     * @param withNonce false splits the key itself and sends no nonce data (v1 import).
+     */
+    public static List<ImportedShare> generateShares(@NotNull TorusKeyType keyType, @NotNull Integer serverTimeOffset, @NotNull List<BigInteger> nodeIndexes, @NotNull List<TorusNodePub> nodePubKeys, @NotNull String privateKey, boolean withNonce) throws Exception {
+        if (!withNonce && keyType != TorusKeyType.secp256k1) {
+            throw TorusUtilError.RUNTIME_ERROR("an import with no nonce supports only secp256k1 keys");
+        }
         if (keyType != TorusKeyType.secp256k1) {
             throw TorusUtilError.RUNTIME_ERROR("Unsupported key type");
         }
 
-        PrivateKeyData keyData = generateKeyData(privateKey);
+        PrivateKeyData keyData = generateKeyData(privateKey, withNonce);
 
         int threshold = (nodePubKeys.size() / 2) + 1;
         int degree = threshold - 1;
@@ -237,7 +254,13 @@ public class KeyUtils {
         Polynomial poly = Lagrange.generateRandomPolynomial(degree, new BigInteger(keyData.getOAuthKey(), 16), null);
         Map<String, Share> shares = poly.generateShares(nodeIndexesBN.toArray(new BigInteger[0]));
 
-        NonceMetadataParams nonceParams = KeyUtils.generateNonceMetadataParams("getOrSetNonce", new BigInteger(keyData.getSigningKey(), 16), new BigInteger(keyData.getNonce(), 16), serverTimeOffset);
+        String nonceData = "";
+        String nonceSignature = "";
+        if (withNonce) {
+            NonceMetadataParams nonceParams = KeyUtils.generateNonceMetadataParams("getOrSetNonce", new BigInteger(keyData.getSigningKey(), 16), new BigInteger(keyData.getNonce(), 16), serverTimeOffset);
+            nonceData = nonceParams.encodedData;
+            nonceSignature = nonceParams.signature;
+        }
 
         List<Ecies> encShares = new ArrayList<>();
         for (int i = 0; i < nodePubKeys.size(); i++) {
@@ -262,7 +285,7 @@ public class KeyUtils {
                     signingPub[0], signingPub[1], encrypted.ciphertext,
                     new EciesHexOmitCipherText(encrypted.iv, encrypted.ephemPublicKey, encrypted.mac, "AES256"), null,
                     Integer.parseInt(nodeIndexes.get(i).toString(16), 16), keyType,
-                    nonceParams.encodedData, nonceParams.signature);
+                    nonceData, nonceSignature);
 
             sharesData.add(importShare);
         }
