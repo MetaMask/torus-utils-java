@@ -115,6 +115,27 @@ public class NodeUtils {
         return firstNodeNonce(nonceDatas, isNewKey);
     }
 
+    /**
+     * Nonce data from the first node that agrees on the threshold public key and carries a usable nonce.
+     */
+    @Nullable
+    private static GetOrSetNonceResult lookupNonce(@NotNull List<JsonRPCResponse<VerifierLookupResponse>> lookupPubKeys, @NotNull KeyResult key) {
+        String thresholdPubKeyX = Common.padLeft(key.keys[0].pub_key_X, '0', 64).toLowerCase();
+        List<GetOrSetNonceResult> nonceDatas = new ArrayList<>();
+        for (JsonRPCResponse<VerifierLookupResponse> x1 : lookupPubKeys) {
+            if (x1 == null || x1.getError() != null) {
+                continue;
+            }
+            VerifierLookupResponse x1Result = x1.getTypedResult(VerifierLookupResponse.class);
+            if (x1Result == null || x1Result.keys == null || x1Result.keys.length == 0) {
+                continue;
+            }
+            String currentNodePubKeyX = Common.padLeft(x1Result.keys[0].pub_key_X, '0', 64).toLowerCase();
+            nonceDatas.add(currentNodePubKeyX.equals(thresholdPubKeyX) ? x1Result.keys[0].nonce_data : null);
+        }
+        return firstNodeNonce(nonceDatas, Boolean.TRUE.equals(key.is_new_key));
+    }
+
     public static KeyLookupResult getPubKeyOrKeyAssign(@NotNull String[] endpoints, @NotNull String verifier, @NotNull String verifierId, @Nullable Integer serverTimeOffset, @Nullable String extendedVerifierId) throws Exception {
         int threshold = (endpoints.length / 2) + 1;
 
@@ -154,30 +175,17 @@ public class NodeUtils {
                     normalizedKeys.add(Common.normalizeKeyResult(vlr));
                 }
                 key = (KeyResult) NodeUtils.thresholdSame(normalizedKeys.toArray(), threshold);
-                if (key != null) {
+                // the metadata nonce comes only from the node responses, on every network;
+                // keep reading node responses until one of them carries it (except for an extended verifier id)
+                if (key != null && key.keys.length > 0 && nonce == null && extendedVerifierId == null) {
+                    nonce = lookupNonce(lookupPubKeys, key);
+                }
+                if (key != null && (nonce != null || extendedVerifierId != null)) {
                     break;
                 }
             } catch (Exception e) {
                 collected.add(null);
             }
-        }
-
-        // the metadata nonce comes only from the node responses, on every network
-        if (key != null && key.keys.length > 0 && nonce == null && extendedVerifierId == null) {
-            String thresholdPubKeyX = Common.padLeft(key.keys[0].pub_key_X,'0',64).toLowerCase();
-            List<GetOrSetNonceResult> nonceDatas = new ArrayList<>();
-            for (JsonRPCResponse<VerifierLookupResponse> x1 : lookupPubKeys) {
-                if (x1 == null || x1.getError() != null) {
-                    continue;
-                }
-                VerifierLookupResponse x1Result = x1.getTypedResult(VerifierLookupResponse.class);
-                if (x1Result == null || x1Result.keys == null || x1Result.keys.length == 0) {
-                    continue;
-                }
-                String currentNodePubKeyX = Common.padLeft(x1Result.keys[0].pub_key_X,'0',64).toLowerCase();
-                nonceDatas.add(currentNodePubKeyX.equals(thresholdPubKeyX) ? x1Result.keys[0].nonce_data : null);
-            }
-            nonce = firstNodeNonce(nonceDatas, Boolean.TRUE.equals(key.is_new_key));
         }
 
         ArrayList<Integer> serverTimeOffsets = new ArrayList<>();
@@ -319,11 +327,15 @@ public class NodeUtils {
                 @SuppressWarnings({"unchecked"}) // Due to Type Erasure of Generic Types at Runtime. Java does this to ensure code is compatible with pre-generic versions of Java.
                 JsonRPCResponse<CommitmentRequestResult> response = json.fromJson(result, JsonRPCResponse.class);
                 if (response != null && response.getError() == null) {
-                    nodeSigs.add(response.getTypedResult(CommitmentRequestResult.class));
-                    received++;
-                    if (!isImportShareReq) {
-                        if (received >= minRequiredCommitmments) {
-                            break;
+                    // a node that answers with neither a result nor an error is skipped
+                    CommitmentRequestResult commitmentResult = response.getTypedResult(CommitmentRequestResult.class);
+                    if (commitmentResult != null) {
+                        nodeSigs.add(commitmentResult);
+                        received++;
+                        if (!isImportShareReq) {
+                            if (received >= minRequiredCommitmments) {
+                                break;
+                            }
                         }
                     }
                 }
@@ -381,7 +393,8 @@ public class NodeUtils {
         List<ShareRequestResult> shareResponses = new ArrayList<>();
         PubKey thresholdPublicKey = null;
 
-        String clientTime = String.valueOf((serverTimeOffset == null) ? 0 : serverTimeOffset) + (System.currentTimeMillis() / 1000L);
+        // plain unix seconds, as torus.js sends it (the earlier string concatenation prefixed the offset)
+        String clientTime = String.valueOf(System.currentTimeMillis() / 1000L);
 
         if (isImportShareReq) {
             ArrayList<ShareRequestItem> importedItems = new ArrayList<>();
