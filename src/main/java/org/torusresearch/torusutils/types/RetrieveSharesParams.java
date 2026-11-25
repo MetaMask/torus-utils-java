@@ -16,8 +16,6 @@ public class RetrieveSharesParams {
     @Nullable
     public final TorusUtilsExtraParams extraParams;
     @Nullable
-    public final Boolean useDkg;
-    @Nullable
     public final Boolean checkCommitment;
     @Nullable
     public final String recordId;
@@ -32,9 +30,38 @@ public class RetrieveSharesParams {
             @NotNull VerifierParams verifierParams,
             @NotNull String idToken
     ) {
-        this(endpoints, indexes, nodePubkeys, verifier, verifierParams, idToken, null, null, null, null, null);
+        this(endpoints, indexes, nodePubkeys, verifier, verifierParams, idToken, null, null, null, null);
     }
 
+    public RetrieveSharesParams(
+            @NotNull String[] endpoints,
+            @NotNull BigInteger[] indexes,
+            @NotNull TorusNodePub[] nodePubkeys,
+            @NotNull String verifier,
+            @NotNull VerifierParams verifierParams,
+            @NotNull String idToken,
+            @Nullable TorusUtilsExtraParams extraParams,
+            @Nullable Boolean checkCommitment,
+            @Nullable String recordId,
+            @Nullable String authConnection
+    ) {
+        this.endpoints = endpoints;
+        this.indexes = indexes;
+        this.nodePubkeys = nodePubkeys;
+        this.verifier = verifier;
+        this.verifierParams = verifierParams;
+        this.idToken = idToken;
+        this.extraParams = extraParams;
+        this.checkCommitment = checkCommitment;
+        this.recordId = recordId;
+        this.authConnection = authConnection;
+    }
+
+    /**
+     * @deprecated {@code useDkg} was removed in v6: new users always get client-generated, imported
+     * keys, so the flag is ignored. Use the constructor without it.
+     */
+    @Deprecated
     public RetrieveSharesParams(
             @NotNull String[] endpoints,
             @NotNull BigInteger[] indexes,
@@ -48,16 +75,6 @@ public class RetrieveSharesParams {
             @Nullable String recordId,
             @Nullable String authConnection
     ) {
-        this.endpoints = endpoints;
-        this.indexes = indexes;
-        this.nodePubkeys = nodePubkeys;
-        this.verifier = verifier;
-        this.verifierParams = verifierParams;
-        this.idToken = idToken;
-        this.extraParams = extraParams;
-        this.useDkg = useDkg;
-        this.checkCommitment = checkCommitment;
-        this.recordId = recordId;
-        this.authConnection = authConnection;
+        this(endpoints, indexes, nodePubkeys, verifier, verifierParams, idToken, extraParams, checkCommitment, recordId, authConnection);
     }
 }

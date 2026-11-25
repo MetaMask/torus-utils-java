@@ -12,6 +12,7 @@ import com.auth0.jwt.algorithms.Algorithm;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 import org.torusresearch.fetchnodedetails.FetchNodeDetails;
 import org.torusresearch.fetchnodedetails.types.NodeDetails;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
@@ -23,6 +24,7 @@ import org.torusresearch.torusutils.types.Metadata;
 import org.torusresearch.torusutils.types.NodesData;
 import org.torusresearch.torusutils.types.OAuthKeyData;
 import org.torusresearch.torusutils.types.OAuthPubKeyData;
+import org.torusresearch.torusutils.types.RetrieveSharesParams;
 import org.torusresearch.torusutils.types.SessionData;
 import org.torusresearch.torusutils.types.VerifierParams;
 import org.torusresearch.torusutils.types.VerifyParams;
@@ -59,7 +61,7 @@ public class CyanTest {
     @BeforeEach
     void setup() throws IOException, NoSuchAlgorithmException, InvalidKeySpecException, TorusUtilError {
         fetchNodeDetails = new FetchNodeDetails(Web3AuthNetwork.CYAN);
-        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.CYAN, null, 0, false);
+        TorusOptions opts = new TorusOptions("YOUR_CLIENT_ID", Web3AuthNetwork.CYAN, 0, false);
         torusUtils = new TorusUtils(opts);
         ECPrivateKey privateKey = (ECPrivateKey) PemUtils.readPrivateKeyFromFile("src/test/java/org/torusresearch/torusutilstest/keys/key.pem", "EC");
         ECPublicKey publicKey = (ECPublicKey) KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(privateKey.getParams().getGenerator(), privateKey.getParams()));
@@ -143,6 +145,7 @@ public class CyanTest {
 
     @DisplayName("Key Assign test")
     @Test
+    @Disabled("Legacy nodes have new key assignment disabled.")
     public void shouldKeyAssign() throws Exception {
         String email = JwtUtils.getRandomEmail();
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails("tkey-google-cyan", email).get();
@@ -156,11 +159,18 @@ public class CyanTest {
 
     @DisplayName("Login test")
     @Test
+    @Disabled("torus-test-health now only accepts @example.com identities, and none exist on legacy networks (key assignment is disabled).")
     public void shouldLogin() throws Exception {
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_VERIFIER, TORUS_TEST_EMAIL).get();
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, null, null);
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_VERIFIER,
-                verifierParams, JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs), null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_VERIFIER,
+                verifierParams,
+                JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs)
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assert ((torusKey.getFinalKeyData().getPrivKey() != null) && torusKey.getFinalKeyData().getPrivKey().equals("5db51619684b32a2ff2375b4c03459d936179dfba401cb1c176b621e8a2e4ac8"));
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(
@@ -180,13 +190,20 @@ public class CyanTest {
 
     @DisplayName("Aggregate Login test")
     @Test
+    @Disabled("torus-test-health now only accepts @example.com identities, and none exist on legacy networks (key assignment is disabled).")
     public void shouldAggregateLogin() throws Exception {
         String idToken = JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs);
         String hashedIdToken = Hash.sha3String(idToken).replace("0x","");
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, new String[]{TORUS_TEST_VERIFIER}, new VerifyParams[]{new VerifyParams(TORUS_TEST_EMAIL, idToken)});
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_AGGREGATE_VERIFIER, TORUS_TEST_EMAIL).get();
-        TorusKey torusKey = torusUtils.retrieveShares(nodeDetails.getTorusNodeEndpoints(), TORUS_TEST_AGGREGATE_VERIFIER,
-                verifierParams, hashedIdToken, null);
+        TorusKey torusKey = torusUtils.retrieveShares(new RetrieveSharesParams(
+                nodeDetails.getTorusNodeEndpoints(),
+                nodeDetails.getTorusIndexes(),
+                nodeDetails.getTorusNodePub(),
+                TORUS_TEST_AGGREGATE_VERIFIER,
+                verifierParams,
+                hashedIdToken
+        ));
         assertTrue(torusKey.getMetadata().getServerTimeOffset() < 20);
         assertEquals("0x34117FDFEFBf1ad2DFA6d4c43804E6C710a6fB04", torusKey.getoAuthKeyData().getWalletAddress());
         assertThat(torusKey).isEqualToComparingFieldByFieldRecursively(new TorusKey(
