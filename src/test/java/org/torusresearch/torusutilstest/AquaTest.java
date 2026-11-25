@@ -12,6 +12,7 @@ import com.auth0.jwt.algorithms.Algorithm;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 import org.torusresearch.fetchnodedetails.FetchNodeDetails;
 import org.torusresearch.fetchnodedetails.types.NodeDetails;
 import org.torusresearch.fetchnodedetails.types.Web3AuthNetwork;
@@ -145,6 +146,7 @@ public class AquaTest {
 
     @DisplayName("Key Assign test")
     @Test
+    @Disabled("Legacy nodes have new key assignment disabled.")
     public void shouldKeyAssign() throws Exception {
         String email = JwtUtils.getRandomEmail();
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails("tkey-google-aqua", email).get();
@@ -159,6 +161,7 @@ public class AquaTest {
 
     @DisplayName("Login test")
     @Test
+    @Disabled("torus-test-health now only accepts @example.com identities, and none exist on legacy networks (key assignment is disabled).")
     public void shouldLogin() throws Exception {
         NodeDetails nodeDetails = fetchNodeDetails.getNodeDetails(TORUS_TEST_VERIFIER, TORUS_TEST_EMAIL).get();
         VerifierParams verifierParams = new VerifierParams(TORUS_TEST_EMAIL, null, null, null);
@@ -189,6 +192,7 @@ public class AquaTest {
 
     @DisplayName("Aggregate Login test")
     @Test
+    @Disabled("torus-test-health now only accepts @example.com identities, and none exist on legacy networks (key assignment is disabled).")
     public void shouldAggregateLogin() throws Exception {
         String idToken = JwtUtils.generateIdToken(TORUS_TEST_EMAIL, algorithmRs);
         String hashedIdToken = Hash.sha3String(idToken).replace("0x","");
